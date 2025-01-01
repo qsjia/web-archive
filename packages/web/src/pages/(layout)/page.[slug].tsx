@@ -2,10 +2,12 @@ import { Button } from '@web-archive/shared/components/button'
 import { useRequest } from 'ahooks'
 import { ArrowLeft, Trash } from 'lucide-react'
 import { useContext, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import IframePageContent from '~/components/iframe-page-content'
 import LoadingWrapper from '~/components/loading-wrapper'
 import ReadabilityPageContent from '~/components/readability-page-content'
 import { deletePage, getPageDetail } from '~/data/page'
+import { useObjectURL } from '~/hooks/useObjectUrl'
 import { useNavigate, useParams } from '~/router'
 import AppContext from '~/store/app'
 
@@ -24,6 +26,7 @@ async function getPageContent(pageId: string | undefined) {
 }
 
 function ArchivePage() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const { slug } = useParams('/page/:slug')
 
@@ -52,15 +55,18 @@ function ArchivePage() {
       window.history.back()
   }
 
-  const { data: pageContentUrl, loading: pageLoading } = useRequest(async () => {
-    const pageHtml = await getPageContent(slug)
-    return pageHtml
-  })
-  useEffect(() => {
-    return () => {
-      pageContentUrl && URL.revokeObjectURL(pageContentUrl)
-    }
-  }, [pageContentUrl])
+  const { objectURL: pageContentUrl, setObject } = useObjectURL(null)
+  const { data: pageHtml, loading: pageLoading } = useRequest(
+    async () => {
+      const pageHtml = await getPageContent(slug)
+      return pageHtml
+    },
+    {
+      onSuccess: (pageHtml) => {
+        setObject(pageHtml)
+      },
+    },
+  )
 
   const { runAsync: runDeletePage } = useRequest(
     deletePage,
@@ -69,7 +75,7 @@ function ArchivePage() {
     },
   )
   const handleDeletePage = async () => {
-    if (!window.confirm('Are you sure you want to delete this page?'))
+    if (!window.confirm(t('delete-this-page-confirm')))
       return
     if (!pageDetail)
       return
@@ -86,12 +92,24 @@ function ArchivePage() {
           <ArrowLeft className="w-5 h-5" />
         </Button>
         <div className="flex space-x-2">
+          <a
+            href={pageContentUrl ?? ''}
+            download={`${pageDetail?.title ?? 'Download'}.html`}
+          >
+            <Button
+              variant="default"
+              size="sm"
+            >
+              {t('download')}
+            </Button>
+          </a>
+
           <Button
             variant="secondary"
             size="sm"
             onClick={() => setReadMode(!readMode)}
           >
-            {readMode ? 'open Iframe mode' : 'open Read mode'}
+            {readMode ? t('open-iframe-mode') : t('open-read-mode')}
           </Button>
           <Button
             variant="destructive"
@@ -105,8 +123,8 @@ function ArchivePage() {
       <div className="flex-1 p-4 w-full">
         <LoadingWrapper loading={pageLoading}>
           {readMode
-            ? <ReadabilityPageContent pageHtml={pageContentUrl || ''} />
-            : <IframePageContent pageHtml={pageContentUrl || ''} />}
+            ? <ReadabilityPageContent pageHtml={pageHtml || ''} />
+            : <IframePageContent pageContentUrl={pageContentUrl || ''} />}
         </LoadingWrapper>
       </div>
     </main>

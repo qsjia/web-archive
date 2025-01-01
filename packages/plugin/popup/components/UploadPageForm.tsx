@@ -6,11 +6,13 @@ import { useState } from 'react'
 import { sendMessage } from 'webext-bridge/popup'
 import { Textarea } from '@web-archive/shared/components/textarea'
 import { Button } from '@web-archive/shared/components/button'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@web-archive/shared/components/select'
 import { useRequest } from 'ahooks'
-import { isNil, isNotNil } from '@web-archive/shared/utils'
+import { isNil } from '@web-archive/shared/utils'
 import toast from 'react-hot-toast'
-import AutoCompleteTagInput from '@web-archive/shared/components/auto-complete-tag-input'
+import { Switch } from '@web-archive/shared/components/switch'
+import { useTranslation } from 'react-i18next'
+import FolderSelectWithCache, { getLastChooseFolderId } from './FolderSelectWithCache'
+import TagInputWithCache from './TagInputWithCache'
 import { getSingleFileSetting } from '~/popup/utils/singleFile'
 import { takeScreenshot } from '~/popup/utils/screenshot'
 import { getCurrentTab } from '~/popup/utils/tab'
@@ -45,56 +47,15 @@ async function scrapePageData() {
   }
 }
 
-async function getAllFolders() {
-  const { folders } = await sendMessage('get-all-folders', {})
-  return folders
-}
-
-async function getAllTags() {
-  const { tags } = await sendMessage('get-all-tags', {})
-  return tags
-}
-
 function UploadPageForm({ setActivePage }: UploadPageFormProps) {
-  const lastChooseFolderId = localStorage.getItem('lastChooseFolderId') || undefined
   const [uploadPageData, setUploadPageData] = useState({
     title: '',
     pageDesc: '',
     href: '',
-    folderId: lastChooseFolderId,
+    folderId: getLastChooseFolderId(),
     screenshot: undefined as undefined | string,
     bindTags: [] as string[],
-  })
-
-  const { data: folderList } = useRequest(getAllFolders, {
-    cacheKey: 'folderList',
-    setCache: (data) => {
-      localStorage.setItem('folderList', JSON.stringify(data))
-    },
-    getCache: () => {
-      const cache = localStorage.getItem('folderList')
-      return cache ? JSON.parse(cache) : []
-    },
-    onSuccess: (data) => {
-      if (isNotNil(uploadPageData.folderId) && !data.some(folder => folder.id.toString() === uploadPageData.folderId)) {
-        setUploadPageData(prevData => ({
-          ...prevData,
-          folderId: undefined,
-        }))
-        lastChooseFolderId && localStorage.removeItem('lastChooseFolderId')
-      }
-    },
-  })
-
-  const { data: tagList } = useRequest(getAllTags, {
-    cacheKey: 'tagList',
-    setCache: (data) => {
-      localStorage.setItem('tagList', JSON.stringify(data))
-    },
-    getCache: () => {
-      const cache = localStorage.getItem('tagList')
-      return cache ? JSON.parse(cache) : []
-    },
+    isShowcased: false,
   })
 
   function handleChange(e: ChangeEvent<HTMLInputElement> | ChangeEvent<HTMLTextAreaElement> | ChangeEvent<HTMLSelectElement>) {
@@ -105,11 +66,17 @@ function UploadPageForm({ setActivePage }: UploadPageFormProps) {
     }))
   }
 
-  function handleFolderSelect(newFolder: string) {
-    localStorage.setItem('lastChooseFolderId', newFolder)
+  function handleFolderSelect(newFolder: string | undefined) {
     setUploadPageData(prevData => ({
       ...prevData,
       folderId: newFolder,
+    }))
+  }
+
+  function handleTagSelect(newTags: string[]) {
+    setUploadPageData(prevData => ({
+      ...prevData,
+      bindTags: newTags,
     }))
   }
 
@@ -125,19 +92,20 @@ function UploadPageForm({ setActivePage }: UploadPageFormProps) {
     },
   )
 
-  function handleCancle() {
+  function handleCancel() {
     setActivePage('home')
   }
 
+  const { t } = useTranslation()
   async function handleSavePage() {
     // todo await folderlist to check folder extists?
     if (isNil(uploadPageData.folderId)) {
-      toast.error('Please select a folder')
+      toast.error(t('folder-required'))
       return
     }
     const tab = await getCurrentTab()
     if (isNil(tab.id)) {
-      toast.error('Can not get current tab info')
+      toast.error(t('get-current-tab-info-failed'))
       return
     }
     await sendMessage('add-save-page-task', {
@@ -150,27 +118,28 @@ function UploadPageForm({ setActivePage }: UploadPageFormProps) {
         folderId: uploadPageData.folderId,
         screenshot: uploadPageData.screenshot,
         bindTags: uploadPageData.bindTags,
+        isShowcased: uploadPageData.isShowcased,
       },
     })
-    toast.success('Add save page task success')
+    toast.success(t('add-save-page-task-success'))
     setActivePage('home')
   }
 
   if (isInitPageData) {
     return (
       <LoadingPage
-        loadingText="Scraping Page Data..."
+        loadingText={t('scraping-page-data')}
       />
     )
   }
 
   return (
-    <div className="w-80 p-4 space-y-4 flex flex-col">
+    <div className="w-80 max-h-[600px] p-4 space-y-4 flex flex-col scrollbar-hide overflow-auto">
       <div className="flex flex-col space-y-2">
         <Label
           htmlFor="title"
         >
-          Title
+          {t('title')}
         </Label>
         <Input
           type="text"
@@ -185,7 +154,7 @@ function UploadPageForm({ setActivePage }: UploadPageFormProps) {
         <Label
           htmlFor="pageDesc"
         >
-          Page Description
+          {t('page-desc')}
         </Label>
         <Textarea
           id="pageDesc"
@@ -198,56 +167,56 @@ function UploadPageForm({ setActivePage }: UploadPageFormProps) {
       </div>
 
       <div className="flex flex-col space-y-2">
-        <Label>Tags</Label>
-        <AutoCompleteTagInput
-          tags={tagList ?? []}
-          shouldLimitHeight
-          onChange={({ bindTags }) => {
-            setUploadPageData(prevData => ({
-              ...prevData,
-              bindTags,
-            }))
-          }}
+        <Label
+          htmlFor="showcased"
         >
-        </AutoCompleteTagInput>
+          Showcased
+        </Label>
+        <Switch
+          checked={uploadPageData.isShowcased}
+          onCheckedChange={value => setUploadPageData(prevData => ({
+            ...prevData,
+            isShowcased: value,
+          }))}
+        >
+        </Switch>
+      </div>
+
+      <div className="flex flex-col space-y-2">
+        <Label>{t('tag')}</Label>
+        <TagInputWithCache
+          title={uploadPageData.title}
+          description={uploadPageData.pageDesc}
+          onValueChange={handleTagSelect}
+        >
+        </TagInputWithCache>
       </div>
 
       <div className="flex flex-col space-y-2">
         <Label
           htmlFor="folderId"
         >
-          Folder
+          {t('folder')}
         </Label>
-        <Select
-          name="folderId"
+        <FolderSelectWithCache
           value={uploadPageData.folderId}
           onValueChange={handleFolderSelect}
         >
-          <SelectTrigger>
-            <SelectValue placeholder="select folder"></SelectValue>
-          </SelectTrigger>
-          <SelectContent className="max-h-48">
-            {folderList && folderList.map(folder => (
-              <SelectItem key={folder.id} value={folder.id.toString()}>
-                {folder.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        </FolderSelectWithCache>
       </div>
 
       <div className="flex justify-between">
         <Button
-          onClick={handleCancle}
+          onClick={handleCancel}
           variant="outline"
         >
-          Cancel
+          {t('cancel')}
         </Button>
         <Button
           disabled={isNil(uploadPageData.folderId)}
           onClick={handleSavePage}
         >
-          Confirm
+          {t('confirm')}
         </Button>
       </div>
     </div>
